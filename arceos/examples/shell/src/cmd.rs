@@ -1,5 +1,6 @@
 use std::fs::{self, File, FileType};
 use std::io::{self, prelude::*};
+use std::string::ToString;
 use std::{string::String, vec::Vec};
 
 #[cfg(all(not(feature = "axstd"), unix))]
@@ -27,6 +28,8 @@ const CMD_TABLE: &[(&str, CmdHandler)] = &[
     ("pwd", do_pwd),
     ("rm", do_rm),
     ("uname", do_uname),
+    ("rename", do_rename),
+    ("mv", do_mv),
 ];
 
 fn file_type_to_char(ty: FileType) -> char {
@@ -192,6 +195,84 @@ fn do_mkdir(args: &str) {
         if let Err(e) = mkdir_one(path) {
             print_err!("mkdir", format_args!("cannot create directory '{path}'"), e);
         }
+    }
+}
+
+fn do_rename(args: &str) {
+    let mut arg_v = args.split(" ");
+    let  old_name = arg_v.next();
+    let  new_name = arg_v.next();
+    if old_name.is_none() || new_name.is_none() || arg_v.next().is_some() {
+        println!("rename: invalid args");
+        println!("usage: rename $old_name $new_name");
+        return;
+    }
+    let old_name_s = old_name.unwrap();
+    let new_name_s = new_name.unwrap();
+    println!("try to rename {old_name_s} to {new_name_s}");
+    if let Err(e) =  fs::rename(old_name_s, new_name_s) {
+        print_err!("rename", format_args!("cannot rename '{old_name_s}' to '{new_name_s}'"), e);
+    }
+    return;
+}
+
+fn do_mv(args: &str) {
+    let mut arg_v = args.split(" ");
+    let  old_file_path = arg_v.next();
+    let  new_file_path = arg_v.next();
+    if old_file_path.is_none() || new_file_path.is_none() || arg_v.next().is_some() {
+        println!("mv: invalid args");
+        println!("usage: mv $old_file_path $new_path_path");
+        return;
+    }
+    fn rm_one(path: &str, rm_dir: bool) -> io::Result<()> {
+        if rm_dir && fs::metadata(path)?.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        }
+    }
+    fn write_file(fname: &str, bufs: &Vec<Vec<u8>>) -> io::Result<()> {
+        let mut file = File::create(fname)?;
+        for buf in bufs {
+            file.write_all(&buf[..])?;
+        }
+        Ok(())
+    }
+    fn read_file(fname: &str, all_data: &mut Vec<Vec<u8>>) -> io::Result<()> {
+        let mut file = File::open(fname)?;
+        loop {
+            let mut buf=vec![0u8;1024];
+            let n = file.read(&mut buf)?;
+            if n > 0 {
+                all_data.push(buf);
+            } else {
+                return Ok(());
+            }
+        }
+    }
+    let old_path = old_file_path.unwrap();
+    let last_separator_pos = old_path.rfind(|c| c == '/' || c == '\\');
+    // 提取文件名
+    let filename = match last_separator_pos {
+        Some(pos) => &old_path[pos + 1..],
+        None => old_path,
+    };
+    let mut new_path = new_file_path.unwrap().to_string();
+    new_path.push('/');
+    new_path.push_str(filename);
+    let mut data:Vec<Vec<u8>> = Vec::new();
+    if let Err(e) = read_file(old_path, &mut data) {
+        print_err!("mv", format_args!("cannot read '{old_path}'"), e);
+        return;
+    }
+    if let Err(e) = write_file(&new_path, &data) {
+        print_err!("mv", format_args!("cannot open '{new_path}'"), e);
+        return;
+    }
+    if let Err(e) = rm_one(old_path, false) {
+        print_err!("mv", format_args!("cannot rm '{old_path}'"), e);
+        return;
     }
 }
 
