@@ -41,5 +41,6 @@ macro_rules! handle_trap {
 /// Call the external syscall handler.
 #[cfg(feature = "uspace")]
 pub(crate) fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
+    debug!("handle syscall in axhal");
     SYSCALL[0](tf, syscall_num)
 }

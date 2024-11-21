@@ -19,8 +19,8 @@ use lazyinit::LazyInit;
 use memory_addr::{va, PhysAddr, VirtAddr};
 use memory_set::MappingError;
 
-const USER_ASPACE_BASE: usize = 0x0000;
-const USER_ASPACE_SIZE: usize = 0x40_0000_0000;
+pub const USER_ASPACE_BASE: usize = 0x0000;
+pub const USER_ASPACE_SIZE: usize = 0x40_0000_0000;
 
 static KERNEL_ASPACE: LazyInit<SpinNoIrq<AddrSpace>> = LazyInit::new();
 

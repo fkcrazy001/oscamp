@@ -1,13 +1,16 @@
 #![allow(dead_code)]
 
 use core::ffi::{c_void, c_char, c_int};
+use core::usize;
 use axhal::arch::TrapFrame;
 use axhal::trap::{register_trap_handler, SYSCALL};
 use axerrno::LinuxError;
+use axmm::{USER_ASPACE_BASE, USER_ASPACE_SIZE};
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
-use arceos_posix_api as api;
+use arceos_posix_api::{self as api, get_file_like};
+use memory_addr::{MemoryAddr, VirtAddr, VirtAddrRange};
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -140,7 +143,53 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    let file = get_file_like(fd);
+    if file.is_err() {
+        return 0;
+    }
+    let file = file.unwrap();
+    let ss = file.stat();
+    if ss.is_err() {
+        return  0;
+    }
+    let size = ss.unwrap().st_size as usize;
+    if length > size {
+        debug!("incoming length is too long!!");
+    }
+    let prot_f = MmapProt::from_bits(prot);
+    if prot_f.is_none() {
+        return  0;
+    }
+    let mpflag:MappingFlags = prot_f.unwrap().into();
+    let mut buf = alloc::vec![0u8; size];
+    if let Err(_) = file.read(&mut buf) {
+        return  0;
+    }
+    let c = current();
+    let mut uspace = c
+        .task_ext()
+        .aspace
+        .lock();
+    let mut vaddr = VirtAddr::from(addr as usize);
+    if let Some(va) = uspace.find_free_area(vaddr, length.align_up_4k(), VirtAddrRange::from_start_size(USER_ASPACE_BASE.into(), USER_ASPACE_SIZE.into())) {
+        debug!("old vaddr {:?}", vaddr);
+        vaddr = va;
+        debug!("new vaddr {:?}", vaddr);
+    } else {
+        ax_println!("can't find free vaddr");
+        return 0;
+    }
+
+    if let Err(e) =  uspace.map_alloc(vaddr, length.align_up_4k(), mpflag, true) {
+        ax_println!("error while mmap, {:?}", e);
+        return 0;
+    }
+    if let Ok(_) = uspace.write(vaddr, &buf) {
+        let ret:usize = vaddr.into();
+        ret as isize
+    } else {
+        0
+    }
 }
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
